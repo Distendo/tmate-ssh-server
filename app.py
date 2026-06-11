@@ -2,8 +2,10 @@ import os
 import subprocess
 import threading
 import signal
+import logging
 from flask import Flask, jsonify
 
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 TMATE_SOCKET = "/tmp/tmate.sock"
@@ -11,20 +13,32 @@ TMATE_READY = threading.Event()
 tmate_ssh = None
 tmate_web = None
 tmate_process = None
+tmate_error = None
 
 
 def start_tmate():
-    global tmate_ssh, tmate_web, tmate_process
+    global tmate_ssh, tmate_web, tmate_process, tmate_error
 
     try:
+        home = os.environ.get("HOME", "/root")
+        os.makedirs(f"{home}/.tmate", exist_ok=True)
+
+        app.logger.info("Starting tmate session...")
         tmate_process = subprocess.Popen(
             ["tmate", "-S", TMATE_SOCKET, "new-session", "-d"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
-        subprocess.run(
+
+        app.logger.info("Waiting for tmate-ready...")
+        result = subprocess.run(
             ["tmate", "-S", TMATE_SOCKET, "wait", "tmate-ready"],
-            check=True, timeout=30,
+            capture_output=True, text=True, timeout=60,
         )
+        if result.returncode != 0:
+            tmate_error = f"tmate wait failed: {result.stderr.strip()}"
+            app.logger.error(tmate_error)
+            TMATE_READY.set()
+            return
 
         ssh_res = subprocess.run(
             ["tmate", "-S", TMATE_SOCKET, "display", "-p", "#{tmate_ssh}"],
@@ -37,7 +51,15 @@ def start_tmate():
 
         tmate_ssh = ssh_res.stdout.strip()
         tmate_web = web_res.stdout.strip()
+        app.logger.info(f"tmate ready: ssh={tmate_ssh}")
+    except subprocess.TimeoutExpired:
+        tmate_error = "tmate timed out waiting for session"
+        app.logger.error(tmate_error)
+    except FileNotFoundError:
+        tmate_error = "tmate binary not found"
+        app.logger.error(tmate_error)
     except Exception as e:
+        tmate_error = str(e)
         app.logger.error(f"tmate error: {e}")
 
     TMATE_READY.set()
@@ -50,16 +72,24 @@ def index():
 
 @app.route("/ssh")
 def get_ssh():
-    TMATE_READY.wait(timeout=10)
+    TMATE_READY.wait(timeout=30)
     if tmate_ssh:
         return jsonify({"command": tmate_ssh, "web": tmate_web})
-    return jsonify({"error": "tmate not ready"}), 503
+    return jsonify({
+        "error": "tmate not ready",
+        "detail": tmate_error,
+        "alive": tmate_process is not None and tmate_process.poll() is None,
+    }), 503
 
 
 @app.route("/health")
 def health():
     alive = tmate_process is not None and tmate_process.poll() is None
-    return jsonify({"tmate_alive": alive, "connected": tmate_ssh is not None})
+    return jsonify({
+        "tmate_alive": alive,
+        "connected": tmate_ssh is not None,
+        "error": tmate_error,
+    })
 
 
 def shutdown():
