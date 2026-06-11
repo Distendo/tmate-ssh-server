@@ -13,6 +13,17 @@ tmate_web = None
 tmate_error = None
 
 
+def run_tmate(*args, timeout=30):
+    env = os.environ.copy()
+    env["HOME"] = os.environ.get("HOME", "/root")
+    result = subprocess.run(
+        ["tmate", *args],
+        capture_output=True, text=True, timeout=timeout,
+        env=env,
+    )
+    return result
+
+
 def start_tmate():
     global tmate_ssh, tmate_web, tmate_error
 
@@ -21,10 +32,7 @@ def start_tmate():
         os.makedirs(f"{home}/.tmate", exist_ok=True)
 
         app.logger.info("Starting tmate session...")
-        ns = subprocess.run(
-            ["tmate", "new-session", "-d"],
-            capture_output=True, text=True, timeout=30,
-        )
+        ns = run_tmate("new-session", "-d", timeout=30)
         if ns.returncode != 0:
             tmate_error = f"new-session failed (rc={ns.returncode}): {ns.stderr.strip()}"
             app.logger.error(tmate_error)
@@ -32,24 +40,15 @@ def start_tmate():
             return
 
         app.logger.info("Waiting for tmate-ready...")
-        result = subprocess.run(
-            ["tmate", "wait", "tmate-ready"],
-            capture_output=True, text=True, timeout=60,
-        )
+        result = run_tmate("wait", "tmate-ready", timeout=60)
         if result.returncode != 0:
             tmate_error = f"tmate wait failed: {result.stderr.strip()}"
             app.logger.error(tmate_error)
             TMATE_READY.set()
             return
 
-        ssh_res = subprocess.run(
-            ["tmate", "display", "-p", "#{tmate_ssh}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        web_res = subprocess.run(
-            ["tmate", "display", "-p", "#{tmate_web}"],
-            capture_output=True, text=True, timeout=5,
-        )
+        ssh_res = run_tmate("display", "-p", "#{tmate_ssh}", timeout=5)
+        web_res = run_tmate("display", "-p", "#{tmate_web}", timeout=5)
 
         tmate_ssh = ssh_res.stdout.strip()
         tmate_web = web_res.stdout.strip()
