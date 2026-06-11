@@ -8,18 +8,16 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 TMATE_READY = threading.Event()
+TMATE_SOCKET = "/tmp/tmate.sock"
 tmate_ssh = None
 tmate_web = None
 tmate_error = None
 
 
 def run_tmate(*args, timeout=30):
-    env = os.environ.copy()
-    env["HOME"] = os.environ.get("HOME", "/root")
     result = subprocess.run(
-        ["tmate", *args],
+        ["tmate", "-S", TMATE_SOCKET, *args],
         capture_output=True, text=True, timeout=timeout,
-        env=env,
     )
     return result
 
