@@ -8,7 +8,6 @@ from flask import Flask, jsonify
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-TMATE_SOCKET = "/tmp/tmate.sock"
 TMATE_READY = threading.Event()
 tmate_ssh = None
 tmate_web = None
@@ -24,14 +23,15 @@ def start_tmate():
         os.makedirs(f"{home}/.tmate", exist_ok=True)
 
         app.logger.info("Starting tmate session...")
+        tmate_stderr = open("/tmp/tmate_new_session.log", "w")
         tmate_process = subprocess.Popen(
-            ["tmate", "-S", TMATE_SOCKET, "new-session", "-d"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            ["tmate", "new-session", "-d"],
+            stdout=subprocess.DEVNULL, stderr=tmate_stderr,
         )
 
         app.logger.info("Waiting for tmate-ready...")
         result = subprocess.run(
-            ["tmate", "-S", TMATE_SOCKET, "wait", "tmate-ready"],
+            ["tmate", "wait", "tmate-ready"],
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode != 0:
@@ -41,11 +41,11 @@ def start_tmate():
             return
 
         ssh_res = subprocess.run(
-            ["tmate", "-S", TMATE_SOCKET, "display", "-p", "#{tmate_ssh}"],
+            ["tmate", "display", "-p", "#{tmate_ssh}"],
             capture_output=True, text=True, timeout=5,
         )
         web_res = subprocess.run(
-            ["tmate", "-S", TMATE_SOCKET, "display", "-p", "#{tmate_web}"],
+            ["tmate", "display", "-p", "#{tmate_web}"],
             capture_output=True, text=True, timeout=5,
         )
 
